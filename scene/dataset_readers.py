@@ -15,7 +15,7 @@ from PIL import Image
 from typing import NamedTuple
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
-from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
+from utils.graphics_utils import getWorld2View1, focal2fov, fov2focal
 import numpy as np
 import json
 from pathlib import Path
@@ -54,7 +54,7 @@ def getNerfppNorm(cam_info):
     cam_centers = []
 
     for cam in cam_info:
-        W2C = getWorld2View2(cam.R, cam.T)
+        W2C = getWorld2View1(cam.R, cam.T)
         C2W = np.linalg.inv(W2C)
         cam_centers.append(C2W[:3, 3:4])
 
@@ -104,12 +104,28 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     sys.stdout.write('\n')
     return cam_infos
 
-def fetchPly(path):
+def fetchPly(path, debug=False, sample_point=30000):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    try:
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    except:
+        num_pts = positions.shape[0]
+        normals = np.zeros((num_pts, 3))
+    # 如果点数太多，需要采样,这里对应稠密重建的情况
+    if positions.shape[0] > sample_point:
+        print(f"初始化点云密集！进行随机采样到 {sample_point} points")
+        sub_ind = np.random.choice(positions.shape[0], sample_point, replace=False)
+        positions = positions[sub_ind]  # numpy array
+        colors = colors[sub_ind]  # numpy array
+        normals = normals[sub_ind]
+    if debug:
+        # 将采样之后的点云保存
+        print('debug')
+        storePly('Debug.ply', positions, colors * 255)
+
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -254,7 +270,91 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+def readCamerasFromTransformsFile(path, transformsfile, extension="", model_path=None):
+    cam_infos = []
+    mode = 'single_cam'
+    if model_path is not None:
+        with open(os.path.join(model_path, transformsfile)) as json_file:
+            contents = json.load(json_file)
+    else: 
+        with open(os.path.join(path, transformsfile)) as json_file:
+            contents = json.load(json_file)
+
+    frames = contents["frames"]
+    # single camera
+    try:
+        FovX = focal2fov(contents["fl_x"], contents["w"])
+        FovY = focal2fov(contents["fl_y"], contents["h"])
+    except:
+        mode = 'muti_cam'
+
+    for idx, frame in enumerate(frames):
+        # muti camera
+        if mode == 'muti_cam':
+            FovX = focal2fov(frame["fl_x"], frame["w"])
+            FovY = focal2fov(frame["fl_y"], frame["h"]) 
+
+        cam_name = os.path.join(path, frame["file_path"] + extension)
+        # colmap坐标系 点云与pose一致
+        matrix = np.array(frame["transform_matrix"])
+
+        R = matrix[:3, :3]
+        T = np.linalg.inv(matrix)[:3, 3]
+
+        image_path = os.path.join(path, cam_name)
+        image_name = Path(cam_name).stem
+        image = Image.open(image_path)
+
+        cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                                    image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+
+    return cam_infos
+
+def readNerfStudioInfo(path, eval, extension="", llffhold=8, model_path=None):
+    cam_infos = readCamerasFromTransformsFile(path, "transforms.json", extension, model_path=model_path)
+
+    if eval:
+        print("Reading Training Transforms from NeRFstudio format")
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+        print(f"Train sample number: {len(train_cam_infos)}")
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+        print(f"Test sample number: {len(test_cam_infos)}")
+    else:
+        print("Reading Training Transforms from NeRFstudio format")
+        train_cam_infos = cam_infos
+        print(f"Train sample number: {len(train_cam_infos)}")
+        test_cam_infos = []
+        print(f"Test sample number: {len(test_cam_infos)}")
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "points3d.ply")
+    print(ply_path)
+    if not os.path.exists(ply_path):
+        # Since this data set has no colmap data, we start with random points
+        num_pts = 100_000
+        print(f"Generating random point cloud ({num_pts})...")
+
+        # We create random points inside the bounds of the synthetic Blender scenes
+        xyz = np.random.random((num_pts, 3)) * nerf_normalization['radius'] - nerf_normalization['translate']
+        shs = np.random.random((num_pts, 3)) / 255.0
+        pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+
+        storePly(ply_path, xyz, SH2RGB(shs) * 255)
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "NeRFstudio" : readNerfStudioInfo,
 }

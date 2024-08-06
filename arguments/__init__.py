@@ -54,6 +54,20 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
+        self.pose_adjustment = True
+        # self.using_depth_local = False
+        self.using_depth_global = True
+        self.using_depth_progressive = False
+        
+        self.mast3r = True
+        # sfm free set 
+        self.progressive = True
+        self.img_fov = 0
+        # test hydrant 1029.34
+        self.focal_known = ""
+        self.scene_scale = 10
+        self.min_conf_thr = 3
+
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -70,23 +84,40 @@ class PipelineParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 30_000
+        self.iterations = 10_000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 30_000
+        self.position_lr_max_steps = 10_000
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
+        self.lambda_depth = 0.2
+        self.lambda_rank_depth = 0.1
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
-        self.densify_until_iter = 15_000
+        self.densify_until_iter = 0
         self.densify_grad_threshold = 0.0002
-        self.random_background = False
+        self.random_background = True
+        
+        # local scene optimization 
+        self.local_scene_iterations = 200
+        self.using_trusted_pixels = True
+        self.trusted_pixels_thr = 0.3
+        self.coarse_to_fine = False
+        # progressive_global_train
+        self.using_focal = False
+        self.progressive_global_train_iterations = 10 # 每张照片平均优化多少次呢？
+        self.densify_from_iter_progressive = 100
+        self.densify_densify_until_iter_progressive = 500
+        self.opacity_reset_interval_progressive = (self.densify_densify_until_iter_progressive + self.densify_from_iter_progressive) / 2
+
+        self.add_priori_freq = 1000
+        
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
