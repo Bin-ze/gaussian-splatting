@@ -55,14 +55,13 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = False
         self.pose_adjustment = True
-        # self.using_depth_local = False
-        self.using_depth_global = True
+        self.using_depth_global = False
         self.using_depth_progressive = False
         
         self.mast3r = True
         # sfm free set 
         self.progressive = True
-        self.img_fov = 0
+        self.img_fov = 90
         # test hydrant 1029.34
         self.focal_known = ""
         self.scene_scale = 10
@@ -106,11 +105,11 @@ class OptimizationParams(ParamGroup):
         
         # local scene optimization 
         self.local_scene_iterations = 200
-        self.using_trusted_pixels = True
+        self.using_trusted_pixels = False
         self.trusted_pixels_thr = 0.3
         self.coarse_to_fine = False
         # progressive_global_train
-        self.using_focal = False
+        self.using_focal = True
         self.progressive_global_train_iterations = 10 # 每张照片平均优化多少次呢？
         self.densify_from_iter_progressive = 100
         self.densify_densify_until_iter_progressive = 500

@@ -501,7 +501,7 @@ def readSFMFreeSceneInfo(dataset_path, min_conf_thr=3, img_fov=90, focal_known=F
                            nerf_normalization=nerf_normalization)
     return scene_info
             
-def readSFMFreeSceneInfo_v1(dataset_path, min_conf_thr=3, img_fov=90, focal_known=False, device='cuda', fps=3, fast=False):
+def readSFMFreeSceneInfo_v1(dataset_path, min_conf_thr=3, img_fov=90, focal_known=False, device='cuda', fps=1, fast=False):
     # instance model
     model = AsymmetricMASt3R.from_pretrained(Mast3R_MODEL_PATH).to(device)
     # 对于整个数据集，首先排序，然后拆分
